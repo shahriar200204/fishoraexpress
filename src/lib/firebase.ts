@@ -65,29 +65,46 @@ if (typeof window !== 'undefined') {
 // ============================================================================
 
 export const FirestoreSync = {
-  // Check if Firestore is reachable and responsive
   isOnline: true,
 
   // --- PARCELS ---
-  async saveParcel(parcel: Parcel): Promise<void> {
+  async saveParcel(parcel: Parcel): Promise<boolean> {
     try {
       const docRef = doc(db, 'parcels', parcel.id);
       await setDoc(docRef, { ...parcel, updatedAt: new Date().toISOString() }, { merge: true });
-    } catch (err) {
-      console.warn('Firestore saveParcel sync error (saved locally):', err);
+      console.log('✅ Firestore: Saved parcel', parcel.id);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore saveParcel error:', err?.message || err);
+      return false;
     }
   },
 
-  async updateParcel(id: string, updates: Partial<Parcel>): Promise<void> {
+  async updateParcel(id: string, updates: Partial<Parcel>): Promise<boolean> {
     try {
       const docRef = doc(db, 'parcels', id);
       await updateDoc(docRef, { ...updates, updatedAt: new Date().toISOString() });
-    } catch (err) {
-      console.warn('Firestore updateParcel sync error:', err);
+      console.log('✅ Firestore: Updated parcel', id);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore updateParcel error:', err?.message || err);
+      return false;
     }
   },
 
-  async batchSaveParcels(parcels: Parcel[]): Promise<void> {
+  async deleteParcel(id: string): Promise<boolean> {
+    try {
+      const docRef = doc(db, 'parcels', id);
+      await deleteDoc(docRef);
+      console.log('✅ Firestore: Deleted parcel', id);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore deleteParcel error:', err);
+      return false;
+    }
+  },
+
+  async batchSaveParcels(parcels: Parcel[]): Promise<boolean> {
     try {
       const batch = writeBatch(db);
       parcels.forEach((p) => {
@@ -95,8 +112,11 @@ export const FirestoreSync = {
         batch.set(ref, { ...p, updatedAt: new Date().toISOString() }, { merge: true });
       });
       await batch.commit();
-    } catch (err) {
-      console.warn('Firestore batchSaveParcels sync error:', err);
+      console.log(`✅ Firestore: Batch saved ${parcels.length} parcels`);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore batchSaveParcels error:', err);
+      return false;
     }
   },
 
@@ -104,8 +124,8 @@ export const FirestoreSync = {
     try {
       const querySnapshot = await getDocs(collection(db, 'parcels'));
       const list: Parcel[] = [];
-      querySnapshot.forEach((doc) => {
-        list.push(doc.data() as Parcel);
+      querySnapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as Parcel);
       });
       return list;
     } catch (err) {
@@ -117,13 +137,11 @@ export const FirestoreSync = {
   subscribeToParcels(callback: (parcels: Parcel[]) => void): () => void {
     try {
       return onSnapshot(collection(db, 'parcels'), (snapshot) => {
-        if (!snapshot.empty) {
-          const list: Parcel[] = [];
-          snapshot.forEach((doc) => {
-            list.push(doc.data() as Parcel);
-          });
-          callback(list);
-        }
+        const list: Parcel[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Parcel);
+        });
+        callback(list);
       }, (err) => {
         console.warn('Firestore parcels live subscription notice:', err.message);
       });
@@ -133,12 +151,15 @@ export const FirestoreSync = {
   },
 
   // --- MERCHANTS ---
-  async saveMerchant(merchant: Merchant): Promise<void> {
+  async saveMerchant(merchant: Merchant): Promise<boolean> {
     try {
       const docRef = doc(db, 'merchants', merchant.id);
       await setDoc(docRef, merchant, { merge: true });
-    } catch (err) {
-      console.warn('Firestore saveMerchant sync error:', err);
+      console.log('✅ Firestore: Saved merchant', merchant.id);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore saveMerchant error:', err?.message || err);
+      return false;
     }
   },
 
@@ -146,8 +167,8 @@ export const FirestoreSync = {
     try {
       const snapshot = await getDocs(collection(db, 'merchants'));
       const list: Merchant[] = [];
-      snapshot.forEach((doc) => {
-        list.push(doc.data() as Merchant);
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as Merchant);
       });
       return list;
     } catch (err) {
@@ -158,13 +179,11 @@ export const FirestoreSync = {
   subscribeToMerchants(callback: (merchants: Merchant[]) => void): () => void {
     try {
       return onSnapshot(collection(db, 'merchants'), (snapshot) => {
-        if (!snapshot.empty) {
-          const list: Merchant[] = [];
-          snapshot.forEach((doc) => {
-            list.push(doc.data() as Merchant);
-          });
-          callback(list);
-        }
+        const list: Merchant[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Merchant);
+        });
+        callback(list);
       }, (err) => {
         console.warn('Firestore merchants subscription notice:', err.message);
       });
@@ -174,12 +193,27 @@ export const FirestoreSync = {
   },
 
   // --- RIDERS ---
-  async saveRider(rider: Rider): Promise<void> {
+  async saveRider(rider: Rider): Promise<boolean> {
     try {
       const docRef = doc(db, 'riders', rider.id);
       await setDoc(docRef, rider, { merge: true });
-    } catch (err) {
-      console.warn('Firestore saveRider error:', err);
+      console.log('✅ Firestore: Saved rider', rider.id, rider.name);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore saveRider error:', err?.message || err);
+      return false;
+    }
+  },
+
+  async deleteRider(id: string): Promise<boolean> {
+    try {
+      const docRef = doc(db, 'riders', id);
+      await deleteDoc(docRef);
+      console.log('✅ Firestore: Deleted rider', id);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore deleteRider error:', err);
+      return false;
     }
   },
 
@@ -187,8 +221,8 @@ export const FirestoreSync = {
     try {
       const snapshot = await getDocs(collection(db, 'riders'));
       const list: Rider[] = [];
-      snapshot.forEach((doc) => {
-        list.push(doc.data() as Rider);
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as Rider);
       });
       return list;
     } catch {
@@ -199,13 +233,11 @@ export const FirestoreSync = {
   subscribeToRiders(callback: (riders: Rider[]) => void): () => void {
     try {
       return onSnapshot(collection(db, 'riders'), (snapshot) => {
-        if (!snapshot.empty) {
-          const list: Rider[] = [];
-          snapshot.forEach((doc) => {
-            list.push(doc.data() as Rider);
-          });
-          callback(list);
-        }
+        const list: Rider[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Rider);
+        });
+        callback(list);
       }, (err) => {
         console.warn('Firestore riders subscription notice:', err.message);
       });
@@ -215,32 +247,93 @@ export const FirestoreSync = {
   },
 
   // --- SETTLEMENTS & PAYOUTS ---
-  async saveSettlement(settlement: SettlementRequest): Promise<void> {
+  async saveSettlement(settlement: SettlementRequest): Promise<boolean> {
     try {
       const docRef = doc(db, 'settlements', settlement.id);
       await setDoc(docRef, settlement, { merge: true });
-    } catch (err) {
-      console.warn('Firestore saveSettlement error:', err);
+      console.log('✅ Firestore: Saved settlement', settlement.id);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore saveSettlement error:', err);
+      return false;
     }
   },
 
   // --- TICKETS ---
-  async saveTicket(ticket: SupportTicket): Promise<void> {
+  async saveTicket(ticket: SupportTicket): Promise<boolean> {
     try {
       const docRef = doc(db, 'tickets', ticket.id);
       await setDoc(docRef, ticket, { merge: true });
-    } catch (err) {
-      console.warn('Firestore saveTicket error:', err);
+      console.log('✅ Firestore: Saved ticket', ticket.id);
+      return true;
+    } catch (err: any) {
+      console.error('❌ Firestore saveTicket error:', err);
+      return false;
     }
   },
 
   // --- AUDIT LOGS ---
-  async saveAuditLog(log: AuditLog): Promise<void> {
+  async saveAuditLog(log: AuditLog): Promise<boolean> {
     try {
       const docRef = doc(db, 'audit_logs', log.id);
       await setDoc(docRef, log, { merge: true });
-    } catch (err) {
-      console.warn('Firestore saveAuditLog error:', err);
+      return true;
+    } catch (err: any) {
+      return false;
+    }
+  },
+
+  // --- ADMIN CREDENTIALS & SECURITY ---
+  async saveAdminCredentials(creds: any): Promise<boolean> {
+    try {
+      const docRef = doc(db, 'system_config', 'admin_credentials');
+      await setDoc(docRef, { ...creds, updatedAt: new Date().toISOString() }, { merge: true });
+      console.log('✅ Firestore: Saved admin credentials');
+      return true;
+    } catch (err: any) {
+      console.warn('Firestore saveAdminCredentials warning:', err?.message);
+      return false;
+    }
+  },
+
+  // --- FULL CLOUD PUSH / SYNC ---
+  async pushAllLocalToFirestore(data: {
+    parcels: Parcel[];
+    merchants: Merchant[];
+    riders: Rider[];
+    settlements?: SettlementRequest[];
+  }): Promise<{ success: boolean; message: string }> {
+    try {
+      const batch = writeBatch(db);
+
+      data.parcels.forEach((p) => {
+        batch.set(doc(db, 'parcels', p.id), { ...p, updatedAt: new Date().toISOString() }, { merge: true });
+      });
+
+      data.merchants.forEach((m) => {
+        batch.set(doc(db, 'merchants', m.id), m, { merge: true });
+      });
+
+      data.riders.forEach((r) => {
+        batch.set(doc(db, 'riders', r.id), r, { merge: true });
+      });
+
+      if (data.settlements) {
+        data.settlements.forEach((s) => {
+          batch.set(doc(db, 'settlements', s.id), s, { merge: true });
+        });
+      }
+
+      await batch.commit();
+      return {
+        success: true,
+        message: `Successfully synchronized ${data.parcels.length} parcels, ${data.merchants.length} merchants, and ${data.riders.length} riders to Firebase Firestore!`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err?.message || 'Failed to sync to Firestore'
+      };
     }
   }
 };

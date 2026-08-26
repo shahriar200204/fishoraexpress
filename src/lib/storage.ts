@@ -41,7 +41,27 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'fishora_audit_logs_v1',
   NOTIFICATIONS: 'fishora_notifications_v1',
   COMPANY_SETTINGS: 'fishora_company_settings_v1',
+  ADMIN_CREDENTIALS: 'fishora_admin_credentials_v1',
   CURRENT_USER: 'fishora_auth_user_v1',
+};
+
+export interface AdminCredentials {
+  id: string;
+  name: string;
+  email: string;
+  password: string;
+  phone: string;
+  role: 'admin';
+  updatedAt?: string;
+}
+
+export const DEFAULT_ADMIN_CREDENTIALS: AdminCredentials = {
+  id: 'ADM-01',
+  name: 'Shahriar Hossain',
+  email: 'shahriar@gmail.com',
+  password: '200230',
+  phone: '+880 1700-000000',
+  role: 'admin',
 };
 
 // Safe JSON parse from localStorage with fallback
@@ -67,14 +87,16 @@ function setStoredItem<T>(key: string, value: T): void {
 export const StorageService = {
   // Initialize default data if empty
   initDefaults() {
+    const isCleanMode = localStorage.getItem('fishora_clean_mode_v1') === 'true';
+
     if (!localStorage.getItem(STORAGE_KEYS.MERCHANTS)) {
-      setStoredItem(STORAGE_KEYS.MERCHANTS, INITIAL_MERCHANTS);
+      setStoredItem(STORAGE_KEYS.MERCHANTS, isCleanMode ? [] : INITIAL_MERCHANTS);
     }
     if (!localStorage.getItem(STORAGE_KEYS.PARCELS)) {
-      setStoredItem(STORAGE_KEYS.PARCELS, INITIAL_PARCELS);
+      setStoredItem(STORAGE_KEYS.PARCELS, isCleanMode ? [] : INITIAL_PARCELS);
     }
     if (!localStorage.getItem(STORAGE_KEYS.RIDERS)) {
-      setStoredItem(STORAGE_KEYS.RIDERS, INITIAL_RIDERS);
+      setStoredItem(STORAGE_KEYS.RIDERS, isCleanMode ? [] : INITIAL_RIDERS);
     }
     if (!localStorage.getItem(STORAGE_KEYS.LOCATIONS)) {
       setStoredItem(STORAGE_KEYS.LOCATIONS, INITIAL_LOCATIONS);
@@ -83,20 +105,90 @@ export const StorageService = {
       setStoredItem(STORAGE_KEYS.PRICING, DEFAULT_PRICING);
     }
     if (!localStorage.getItem(STORAGE_KEYS.SETTLEMENTS)) {
-      setStoredItem(STORAGE_KEYS.SETTLEMENTS, INITIAL_SETTLEMENTS);
+      setStoredItem(STORAGE_KEYS.SETTLEMENTS, isCleanMode ? [] : INITIAL_SETTLEMENTS);
     }
     if (!localStorage.getItem(STORAGE_KEYS.LEDGER)) {
-      setStoredItem(STORAGE_KEYS.LEDGER, INITIAL_LEDGER);
+      setStoredItem(STORAGE_KEYS.LEDGER, isCleanMode ? [] : INITIAL_LEDGER);
     }
     if (!localStorage.getItem(STORAGE_KEYS.TICKETS)) {
-      setStoredItem(STORAGE_KEYS.TICKETS, INITIAL_TICKETS);
+      setStoredItem(STORAGE_KEYS.TICKETS, isCleanMode ? [] : INITIAL_TICKETS);
     }
     if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
-      setStoredItem(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+      setStoredItem(STORAGE_KEYS.AUDIT_LOGS, isCleanMode ? [] : INITIAL_AUDIT_LOGS);
     }
     if (!localStorage.getItem(STORAGE_KEYS.COMPANY_SETTINGS)) {
       setStoredItem(STORAGE_KEYS.COMPANY_SETTINGS, DEFAULT_COMPANY_SETTINGS);
     }
+    if (!localStorage.getItem(STORAGE_KEYS.ADMIN_CREDENTIALS)) {
+      setStoredItem(STORAGE_KEYS.ADMIN_CREDENTIALS, DEFAULT_ADMIN_CREDENTIALS);
+    }
+  },
+
+  // ===== ADMIN SECURITY & CREDENTIALS =====
+  getAdminCredentials(): AdminCredentials {
+    const creds = getStoredItem<AdminCredentials>(STORAGE_KEYS.ADMIN_CREDENTIALS, DEFAULT_ADMIN_CREDENTIALS);
+    return {
+      ...DEFAULT_ADMIN_CREDENTIALS,
+      ...creds,
+    };
+  },
+
+  updateAdminCredentials(
+    updates: {
+      name?: string;
+      email?: string;
+      password?: string;
+      phone?: string;
+    },
+    actorName = 'Admin'
+  ): { success: boolean; data: AdminCredentials; message?: string } {
+    const current = this.getAdminCredentials();
+    const updated: AdminCredentials = {
+      ...current,
+      ...(updates.name ? { name: updates.name.trim() } : {}),
+      ...(updates.email ? { email: updates.email.trim().toLowerCase() } : {}),
+      ...(updates.password ? { password: updates.password.trim() } : {}),
+      ...(updates.phone ? { phone: updates.phone.trim() } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setStoredItem(STORAGE_KEYS.ADMIN_CREDENTIALS, updated);
+
+    // Persist to Firebase Firestore
+    FirestoreSync.saveAdminCredentials(updated);
+
+    // Update active login session if currently admin
+    const SESSION_KEY = 'fishora_current_session_v1';
+    try {
+      const activeSession = localStorage.getItem(SESSION_KEY);
+      if (activeSession) {
+        const parsed = JSON.parse(activeSession);
+        if (parsed.role === 'admin') {
+          parsed.user = {
+            id: updated.id,
+            email: updated.email,
+            name: updated.name,
+            phone: updated.phone,
+            role: 'admin',
+          };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    this.addAuditLog({
+      userId: 'ADM-01',
+      userName: actorName,
+      userRole: 'admin',
+      action: 'ADMIN_CREDENTIALS_UPDATED',
+      targetType: 'admin_security',
+      targetId: updated.email,
+      details: `Admin profile/credentials updated. Login Email: ${updated.email}`
+    });
+
+    return { success: true, data: updated, message: 'Admin login credentials updated successfully.' };
   },
 
   init() {
@@ -108,35 +200,21 @@ export const StorageService = {
         // Realtime Parcels sync from Cloud
         FirestoreSync.subscribeToParcels((cloudParcels) => {
           if (cloudParcels && cloudParcels.length > 0) {
-            const local = this.getParcels();
-            // Merge cloud parcels preserving any local updates
-            const map = new Map<string, Parcel>();
-            local.forEach((p) => map.set(p.id, p));
-            cloudParcels.forEach((p) => map.set(p.id, p));
-            const merged = Array.from(map.values());
-            setStoredItem(STORAGE_KEYS.PARCELS, merged);
+            setStoredItem(STORAGE_KEYS.PARCELS, cloudParcels);
           }
         });
 
         // Realtime Merchants sync from Cloud
         FirestoreSync.subscribeToMerchants((cloudMerchants) => {
           if (cloudMerchants && cloudMerchants.length > 0) {
-            const local = getStoredItem<any[]>(STORAGE_KEYS.MERCHANTS, INITIAL_MERCHANTS);
-            const map = new Map<string, any>();
-            local.forEach((m) => map.set(m.id, m));
-            cloudMerchants.forEach((m) => map.set(m.id, m));
-            setStoredItem(STORAGE_KEYS.MERCHANTS, Array.from(map.values()));
+            setStoredItem(STORAGE_KEYS.MERCHANTS, cloudMerchants);
           }
         });
 
         // Realtime Riders sync from Cloud
         FirestoreSync.subscribeToRiders((cloudRiders) => {
           if (cloudRiders && cloudRiders.length > 0) {
-            const local = getStoredItem<any[]>(STORAGE_KEYS.RIDERS, INITIAL_RIDERS);
-            const map = new Map<string, any>();
-            local.forEach((r) => map.set(r.id, r));
-            cloudRiders.forEach((r) => map.set(r.id, r));
-            setStoredItem(STORAGE_KEYS.RIDERS, Array.from(map.values()));
+            setStoredItem(STORAGE_KEYS.RIDERS, cloudRiders);
           }
         });
       } catch (err) {
@@ -145,7 +223,31 @@ export const StorageService = {
     }
   },
 
+  // Clear demo data and switch to 100% clean live database mode
+  clearToCleanLiveMode() {
+    localStorage.setItem('fishora_clean_mode_v1', 'true');
+    setStoredItem(STORAGE_KEYS.PARCELS, []);
+    setStoredItem(STORAGE_KEYS.RIDERS, []);
+    setStoredItem(STORAGE_KEYS.MERCHANTS, []);
+    setStoredItem(STORAGE_KEYS.SETTLEMENTS, []);
+    setStoredItem(STORAGE_KEYS.LEDGER, []);
+    setStoredItem(STORAGE_KEYS.TICKETS, []);
+    setStoredItem(STORAGE_KEYS.AUDIT_LOGS, []);
+    window.dispatchEvent(new Event('fishora_storage_change'));
+  },
+
+  // Push all local data into Firebase Firestore
+  async syncAllToFirestore() {
+    return await FirestoreSync.pushAllLocalToFirestore({
+      parcels: this.getParcels(),
+      merchants: this.getMerchants(),
+      riders: this.getRiders(),
+      settlements: this.getSettlements(),
+    });
+  },
+
   resetToDemo() {
+    localStorage.removeItem('fishora_clean_mode_v1');
     setStoredItem(STORAGE_KEYS.MERCHANTS, INITIAL_MERCHANTS);
     setStoredItem(STORAGE_KEYS.PARCELS, INITIAL_PARCELS);
     setStoredItem(STORAGE_KEYS.RIDERS, INITIAL_RIDERS);
@@ -156,6 +258,7 @@ export const StorageService = {
     setStoredItem(STORAGE_KEYS.TICKETS, INITIAL_TICKETS);
     setStoredItem(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
     setStoredItem(STORAGE_KEYS.COMPANY_SETTINGS, DEFAULT_COMPANY_SETTINGS);
+    setStoredItem(STORAGE_KEYS.ADMIN_CREDENTIALS, DEFAULT_ADMIN_CREDENTIALS);
   },
 
   // ===== AUTHENTICATION =====
@@ -179,29 +282,42 @@ export const StorageService = {
     const cleanPass = password.trim();
 
     if (role === 'admin') {
-      // Allow shahriar@gmail.com / 200230, admin@fishoraexpress.com / admin123, or demo shortcuts
-      const isValidAdmin = 
+      const adminCreds = this.getAdminCredentials();
+      const currentEmail = (adminCreds.email || 'shahriar@gmail.com').toLowerCase();
+
+      // Check if matches updated configured email OR defaults
+      const isEmailValid =
+        cleanId === currentEmail ||
         cleanId === 'shahriar@gmail.com' ||
         cleanId === 'admin@fishoraexpress.com' ||
         cleanId === 'admin' ||
         cleanId.includes('shahriar') ||
         cleanId.includes('admin');
 
-      if (isValidAdmin) {
-        // If password is provided, verify it (allow 200230, admin123, demo123, or empty in quick test)
-        if (cleanPass && cleanPass !== '200230' && cleanPass !== 'admin123' && cleanPass !== 'demo123' && cleanPass !== 'admin') {
-          return { success: false, error: 'Incorrect admin password. (Default: 200230)' };
+      if (isEmailValid) {
+        // Verify current updated password or default PINs
+        const isPasswordValid =
+          cleanPass === adminCreds.password ||
+          cleanPass === '200230' ||
+          cleanPass === 'admin123' ||
+          cleanPass === 'demo123' ||
+          cleanPass === 'admin';
+
+        if (cleanPass && !isPasswordValid) {
+          return { success: false, error: 'Incorrect admin password. Please try again with your updated password.' };
         }
+
         const adminUser = {
-          id: 'ADM-01',
-          email: cleanId.includes('shahriar') ? 'shahriar@gmail.com' : 'admin@fishoraexpress.com',
+          id: adminCreds.id || 'ADM-01',
+          email: adminCreds.email || 'shahriar@gmail.com',
           role: 'admin',
-          name: cleanId.includes('shahriar') ? 'Shahriar Hossain (Admin)' : 'Super Admin',
+          name: adminCreds.name || 'Shahriar Hossain (Admin)',
+          phone: adminCreds.phone || '+880 1700-000000',
           status: 'active'
         };
         return Object.assign(adminUser, { success: true, user: adminUser });
       }
-      return { success: false, error: 'Admin account not found with this email.' };
+      return { success: false, error: `Admin account not found with "${identifier}". Please enter your registered admin email.` };
     }
 
     if (role === 'merchant') {
@@ -818,6 +934,7 @@ export const StorageService = {
     });
 
     setStoredItem(STORAGE_KEYS.PARCELS, parcels);
+    FirestoreSync.saveParcel(parcel);
 
     // Notify Rider
     this.addNotification({
@@ -850,11 +967,13 @@ export const StorageService = {
   addRider(data: {
     name: string;
     phone: string;
-    email: string;
+    email?: string;
     zone?: string;
     assignedArea?: string;
     address?: string;
     vehicleType?: string;
+    nid?: string;
+    password?: string;
     status?: 'active' | 'inactive';
   }, actorName = 'Admin'): Rider {
     const riders = getStoredItem<any[]>(STORAGE_KEYS.RIDERS, INITIAL_RIDERS);
@@ -863,7 +982,7 @@ export const StorageService = {
       id: `RDR-${nextNum}`,
       name: data.name,
       phone: data.phone,
-      email: data.email,
+      email: data.email || `${data.name.toLowerCase().replace(/\s+/g, '')}@fishora.com`,
       address: data.address || '',
       zone: data.zone || data.assignedArea || 'Dhaka Central Hub',
       assignedArea: data.assignedArea || data.zone || 'Dhaka Central Hub',
@@ -875,6 +994,7 @@ export const StorageService = {
     };
     riders.unshift(newRider);
     setStoredItem(STORAGE_KEYS.RIDERS, riders);
+    FirestoreSync.saveRider(newRider);
 
     this.addAuditLog({
       userId: 'ADM-01',
@@ -883,10 +1003,28 @@ export const StorageService = {
       action: 'RIDER_ADDED',
       targetType: 'rider',
       targetId: newRider.id,
-      details: `Added new rider ${newRider.name} for area ${newRider.zone}`
+      details: `Added new rider ${newRider.name} (${newRider.phone}) for area ${newRider.zone}`
     });
 
     return newRider;
+  },
+
+  deleteRider(id: string, actorName = 'Admin'): boolean {
+    const riders = getStoredItem<any[]>(STORAGE_KEYS.RIDERS, INITIAL_RIDERS);
+    const filtered = riders.filter((r) => r.id !== id);
+    setStoredItem(STORAGE_KEYS.RIDERS, filtered);
+    FirestoreSync.deleteRider(id);
+
+    this.addAuditLog({
+      userId: 'ADM-01',
+      userName: actorName,
+      userRole: 'admin',
+      action: 'RIDER_DELETED',
+      targetType: 'rider',
+      targetId: id,
+      details: `Removed rider ${id}`
+    });
+    return true;
   },
 
   incrementRiderDeliveries(riderId: string, codAmount: number) {

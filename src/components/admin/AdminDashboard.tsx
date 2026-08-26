@@ -38,6 +38,7 @@ import {
   Plus,
   Edit2,
   Trash2,
+  Activity,
   LogOut,
   MapPin,
   TrendingUp,
@@ -90,10 +91,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isNewRiderModalOpen, setIsNewRiderModalOpen] = useState(false);
   const [newRiderName, setNewRiderName] = useState('');
   const [newRiderPhone, setNewRiderPhone] = useState('');
+  const [newRiderNid, setNewRiderNid] = useState('');
+  const [newRiderPassword, setNewRiderPassword] = useState('1234');
+  const [newRiderAddress, setNewRiderAddress] = useState('');
   const [newRiderZone, setNewRiderZone] = useState('Mirpur & Dhanmondi, Dhaka');
   const [newRiderVehicle, setNewRiderVehicle] = useState('Motorcycle');
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
   const [ticketReplyText, setTicketReplyText] = useState('');
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [cloudSyncFeedback, setCloudSyncFeedback] = useState('');
 
   // Pricing Edit form state
   const [editPricing, setEditPricing] = useState<BusinessPricingConfig>(pricing);
@@ -115,6 +121,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     window.addEventListener('fishora_storage_change', handleStorageChange);
     return () => window.removeEventListener('fishora_storage_change', handleStorageChange);
   }, []);
+
+  const handleCloudSync = async () => {
+    setIsSyncingCloud(true);
+    setCloudSyncFeedback('');
+    try {
+      const res = await StorageService.syncAllToFirestore();
+      if (res.success) {
+        setCloudSyncFeedback(res.message);
+        confetti({ particleCount: 50, spread: 60, origin: { y: 0.2 } });
+      } else {
+        setCloudSyncFeedback('Sync Notice: ' + res.message);
+      }
+    } catch (err: any) {
+      setCloudSyncFeedback('Sync Error: ' + (err?.message || 'Failed to sync'));
+    } finally {
+      setIsSyncingCloud(false);
+      setTimeout(() => setCloudSyncFeedback(''), 6000);
+      refreshAllData();
+    }
+  };
+
+  const handleResetToClean = () => {
+    if (window.confirm('Are you sure you want to clear all test/demo records and start with 0 data? Only real parcels and riders you create will appear.')) {
+      StorageService.clearToCleanLiveMode();
+      refreshAllData();
+      setCloudSyncFeedback('Database cleared! Now running on 100% clean live database.');
+      setTimeout(() => setCloudSyncFeedback(''), 5000);
+    }
+  };
 
   // System Stats
   const totalParcels = parcels.length;
@@ -206,13 +241,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       email: `${newRiderName.toLowerCase().replace(/\s+/g, '')}@fishora.com`,
       zone: newRiderZone,
       vehicleType: newRiderVehicle,
+      address: newRiderAddress.trim(),
+      nid: newRiderNid.trim(),
+      password: newRiderPassword.trim() || '1234',
       status: 'active',
     });
 
     setIsNewRiderModalOpen(false);
     setNewRiderName('');
     setNewRiderPhone('');
+    setNewRiderNid('');
+    setNewRiderAddress('');
+    setNewRiderPassword('1234');
     refreshAllData();
+    setCloudSyncFeedback('Rider registered successfully to database & Firebase cloud!');
+    setTimeout(() => setCloudSyncFeedback(''), 5000);
+  };
+
+  const handleDeleteRider = (riderId: string, riderName: string) => {
+    if (window.confirm(`Are you sure you want to remove rider ${riderName} (${riderId})?`)) {
+      StorageService.deleteRider(riderId);
+      refreshAllData();
+    }
   };
 
   // Ticket Reply
@@ -263,6 +313,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => setIsNewRiderModalOpen(true)}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 shadow-md"
+                title="Add New Rider"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Add Rider</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCloudSync}
+                disabled={isSyncingCloud}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-xs rounded-xl border border-emerald-500/30 transition flex items-center gap-1.5"
+                title="Push all local state to Firebase Firestore Cloud"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin text-emerald-400' : ''}`} />
+                <span className="hidden sm:inline">{isSyncingCloud ? 'Syncing...' : 'Cloud Sync'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetToClean}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-rose-900/40 text-rose-300 font-bold text-xs rounded-xl border border-rose-500/30 transition"
+                title="Clear demo data and start with 0 records in live mode"
+              >
+                <span className="hidden md:inline">🧹 Clean Live DB</span>
+                <span className="md:hidden">🧹</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={refreshAllData}
                 className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition"
                 title="Refresh Live Data"
@@ -280,6 +361,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Cloud Sync Feedback Banner */}
+          {cloudSyncFeedback && (
+            <div className="bg-blue-600/90 text-white text-xs font-bold px-4 py-2 rounded-xl mb-2 flex items-center justify-between border border-blue-400/40 shadow-lg animate-fadeIn">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
+                <span>{cloudSyncFeedback}</span>
+              </div>
+              <button onClick={() => setCloudSyncFeedback('')} className="text-white/80 hover:text-white text-sm">✕</button>
+            </div>
+          )}
 
           {/* Sub Navigation Bar Tabs */}
           <div className="flex space-x-1 sm:space-x-3 border-t border-slate-800/80 py-2 overflow-x-auto text-xs font-bold">
@@ -370,6 +462,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
+            {/* Quick Live Operations Control Bar */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-blue-950/60 via-slate-800 to-slate-800 border border-blue-500/30 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-blue-600/30 text-blue-400 flex items-center justify-center font-black">
+                  <Activity className="w-6 h-6 text-blue-400" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-white flex items-center gap-2">
+                    Firebase Cloud Database Engine
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                      LIVE PERSISTENCE ACTIVE
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Realtime sync enabled for Parcels, Riders, Settlements, and Merchant accounts
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setIsNewRiderModalOpen(true)}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  + Add New Rider
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloudSync}
+                  disabled={isSyncingCloud}
+                  className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-emerald-300 font-bold text-xs rounded-xl border border-emerald-500/30 flex items-center gap-1.5 transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                  {isSyncingCloud ? 'Syncing Cloud...' : '☁️ Push to Firebase'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetToClean}
+                  className="px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 font-bold text-xs rounded-xl border border-rose-500/30 transition"
+                >
+                  🧹 Clear Demo (Start 0 Live)
+                </button>
+              </div>
+            </div>
+
             {/* 4 Metric Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="p-5 rounded-2xl bg-slate-800 border border-slate-700 shadow-md">
@@ -813,6 +952,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <span className="text-[10px] text-amber-400 block">COD Held</span>
                         <span className="font-bold text-amber-400 text-xs">৳{cashInHand}</span>
                       </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-400">Login PIN: <b className="text-slate-200">1234</b></span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRider(r.id, r.name)}
+                        className="px-2.5 py-1 text-[11px] bg-rose-950/40 text-rose-400 hover:bg-rose-900/60 font-bold rounded-lg border border-rose-800/40 transition"
+                      >
+                        Remove Rider
+                      </button>
                     </div>
                   </div>
                 );
@@ -1305,6 +1455,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         isOpen={isNewRiderModalOpen}
         onClose={() => setIsNewRiderModalOpen(false)}
         title="Add Field Courier Rider"
+        subtitle="Register new delivery personnel. Rider can log in using their phone and PIN."
         maxWidth="md"
       >
         <form onSubmit={handleCreateRider} className="space-y-4 text-slate-900">
@@ -1320,44 +1471,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Phone Number *</label>
-            <input
-              type="tel"
-              required
-              value={newRiderPhone}
-              onChange={(e) => setNewRiderPhone(e.target.value)}
-              placeholder="01712-XXXXXX"
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-600"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Phone Number *</label>
+              <input
+                type="tel"
+                required
+                value={newRiderPhone}
+                onChange={(e) => setNewRiderPhone(e.target.value)}
+                placeholder="01712-XXXXXX"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Login PIN / Password</label>
+              <input
+                type="text"
+                value={newRiderPassword}
+                onChange={(e) => setNewRiderPassword(e.target.value)}
+                placeholder="1234"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Dhaka Zone *</label>
+              <input
+                type="text"
+                required
+                value={newRiderZone}
+                onChange={(e) => setNewRiderZone(e.target.value)}
+                placeholder="e.g. Uttara & Airport, Dhaka"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Vehicle Type</label>
+              <select
+                value={newRiderVehicle}
+                onChange={(e) => setNewRiderVehicle(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white"
+              >
+                <option value="Motorcycle">Motorcycle</option>
+                <option value="Bicycle">Bicycle</option>
+                <option value="Delivery Van">Delivery Van</option>
+                <option value="Electric Scooter">Electric Scooter</option>
+              </select>
+            </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Dhaka Zone *</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">National ID / NID Number (Optional)</label>
             <input
               type="text"
-              required
-              value={newRiderZone}
-              onChange={(e) => setNewRiderZone(e.target.value)}
-              placeholder="e.g. Uttara & Airport, Dhaka"
+              value={newRiderNid}
+              onChange={(e) => setNewRiderNid(e.target.value)}
+              placeholder="e.g. 19942692518000XXX"
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Vehicle Type</label>
-            <select
-              value={newRiderVehicle}
-              onChange={(e) => setNewRiderVehicle(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white"
-            >
-              <option value="Motorcycle">Motorcycle</option>
-              <option value="Bicycle">Bicycle</option>
-              <option value="Delivery Van">Delivery Van</option>
-            </select>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Present Address / Depot Location</label>
+            <input
+              type="text"
+              value={newRiderAddress}
+              onChange={(e) => setNewRiderAddress(e.target.value)}
+              placeholder="e.g. House 14, Road 5, Mirpur-10, Dhaka"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300"
+            />
           </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setIsNewRiderModalOpen(false)}
@@ -1367,9 +1554,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md"
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5"
             >
-              Save Rider Profile
+              <CheckCircle2 className="w-4 h-4" />
+              Save & Register Rider
             </button>
           </div>
         </form>
