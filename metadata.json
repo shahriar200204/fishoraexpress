@@ -1,0 +1,6 @@
+{
+  "name": "FISHORA Express",
+  "description": "Fast Delivery. Trusted Service. Bangladesh courier and delivery management web platform with merchant dashboard, public tracking, rider management, live GPS tracking, and COD settlements.",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
